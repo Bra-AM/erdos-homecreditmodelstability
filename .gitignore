@@ -1,0 +1,22 @@
+# Competition data: must be downloaded from Kaggle and may not be redistributed.
+data/*
+!data/README.md
+home-credit-credit-risk-model-stability/
+*.parquet
+submission.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Notebook by-products
+Digraph.gv*
+
+.DS_Store

@@ -1,0 +1,15 @@
+# Libraries used by the notebooks and the creditrisk package.
+# The notebooks were originally run on Google Colab (Python 3.10, April 2024)
+# and locally; exact versions were not recorded at the time, so none are
+# pinned here.
+graphviz
+jupyterlab
+lightgbm
+matplotlib
+numpy
+pandas
+polars
+pytest
+scikit-learn
+seaborn
+xgboost
