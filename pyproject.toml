@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creditrisk"
+version = "0.1.0"
+description = "Reusable code for the Home Credit credit-risk model-stability project."
+requires-python = ">=3.9"
+dependencies = ["numpy", "pandas", "scikit-learn"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
