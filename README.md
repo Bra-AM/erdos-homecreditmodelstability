@@ -2,77 +2,85 @@
 
 [![tests](https://github.com/Bra-AM/erdos-homecreditmodelstability/actions/workflows/tests.yml/badge.svg)](https://github.com/Bra-AM/erdos-homecreditmodelstability/actions/workflows/tests.yml)
 
-**Which loan applicants are likely to default, and will the model that says so
-still be right six months from now?**
+When a lender decides whether to approve a loan, it relies on a model that
+ranks applicants by how likely they are to default. These models are expensive
+to build and validate, so once they're in production they tend to stay there
+for a long time. That's a problem if the model quietly gets worse as the people
+applying, and the economy around them, change.
 
-Lenders retrain credit models rarely, so a model that scores well today but
-degrades as the applicant population shifts is costly: it approves loans it
-should decline, and declines people who would have repaid, often those with
-little credit history. Home Credit, an international consumer-finance
-provider, posed this as a
+In 2024 Home Credit, a consumer lender that serves many people with little or
+no credit history, ran a
 [Kaggle competition](https://www.kaggle.com/competitions/home-credit-credit-risk-model-stability)
-scored on a metric that rewards accuracy *and* penalises decay over time. This
-repository is our entry point into that problem: 1.5 million loan applications,
-three model families, and the competition's stability metric.
+around exactly this question. A model wasn't judged only on how well it ranks
+applicants, but on whether it keeps doing so week after week. I worked on it
+with Sze Hong Kwong during the Spring 2024
+[Erdos Institute](https://www.erdosinstitute.org/) Data Science Boot Camp
+([project page](https://www.erdosinstitute.org/project-database/spring-2024/data-science-boot-camp/home-credit---credit-risk-model-stability-ii),
+[executive summary](reports/executive_summary_spring_2024.pdf)).
 
-Project for the [Erdos Institute](https://www.erdosinstitute.org/) Data Science
-Boot Camp, Spring 2024, by **Brady Ali Medina** and **Sze Hong Kwong**.
-[Project page](https://www.erdosinstitute.org/project-database/spring-2024/data-science-boot-camp/home-credit---credit-risk-model-stability-ii)
-· [Executive summary (PDF)](reports/executive_summary_spring_2024.pdf)
+## The data
 
-## At a glance
+The training set has about 1.5 million loan applications decided between
+January 2019 and October 2020, and roughly 3% of them defaulted. The data isn't
+one tidy table. It's a set of related tables linked by an application ID: the
+application itself, information from a credit bureau, the applicant's previous
+applications, and the people attached to each loan. Some of these tables have
+many rows per application, so they have to be summarised (a maximum, a count,
+an "any late payment?") before everything can be joined into one row per
+application. Missing values are everywhere: only about 3.5% of applicants have
+a risk assessment from the credit bureau, for example.
 
-| | |
-|---|---|
-| **Task** | Binary classification: will this application default? |
-| **Data** | 1,526,659 applications over 92 weeks (Jan 2019 - Oct 2020), ~3.1% defaults, spread over relational tables keyed by `case_id` |
-| **Metric** | Gini stability: mean weekly Gini, minus penalties for a falling trend and for week-to-week volatility |
-| **Models** | XGBoost, a multilayer perceptron (scikit-learn), LightGBM; random-forest baseline |
-| **Best result** | LightGBM: test AUC 0.778, stability 0.521, with a train-test gap of only 0.014 AUC |
-| **Stakeholders** | Consumer lenders; applicants, particularly those with thin credit files |
+## How performance is measured
 
-## The stability metric
-
-For each week *w* of loan decisions, compute the Gini coefficient
-`gini_w = 2·AUC_w − 1`. Fit a line `gini_w ≈ a·w + b` through the weekly
-values. Then
+The competition uses a metric built on the Gini coefficient (`2·AUC − 1`), a
+standard measure in credit scoring of how well a score separates defaulters
+from everyone else. The twist is that it's computed separately for every week
+of decisions. A straight line is fitted through the weekly values, and the
+final score is
 
 ```
-stability = mean(gini_w) + 88 · min(0, a) − 0.5 · std(residuals)
+stability = mean(weekly Gini) + 88 · min(0, slope) − 0.5 · std(residuals)
 ```
 
-A model is rewarded for ranking defaulters above non-defaulters, penalised if
-that ability trends downward (`a < 0`), and penalised if it is erratic from
-week to week. The implementation, with unit tests against the competition's
-reference code, is in [`src/creditrisk/metrics.py`](src/creditrisk/metrics.py).
+So a model gets credit for ranking applicants well on average, loses a lot if
+its performance trends downward over time, and loses a little if it bounces
+around from week to week. Getting better over time earns nothing extra. I
+implemented the metric in [`src/creditrisk/metrics.py`](src/creditrisk/metrics.py)
+and tested it against the competition's reference code.
 
-## Approach
+## What we did
 
-1. **Data preparation** ([notebook 01](notebooks/01_data_cleaning_eda_feature_engineering.ipynb)).
-   Join the base table with internal application data, credit-bureau data,
-   previous applications and applicant details. Tables with several rows per
-   application are aggregated to one row first.
-2. **Exploratory analysis.** Individual features are only weakly correlated
-   with default (|r| < 0.01 for income, annuity and debt). The strongest single
-   signal is the credit bureau's own risk band (r ≈ 0.23), but only 3.5% of
-   applicants have one.
-3. **Feature engineering.** The bureau's text risk band (`'6% - 8%'`) becomes a
-   numeric midpoint plus a has-assessment indicator; days-past-due columns over
-   different horizons are combined into weighted summaries.
-4. **Models.**
-   * [XGBoost](notebooks/02_xgboost.ipynb) on ~30 selected features, with class
-     weighting for the 31:1 imbalance, and a
-     [feature ablation with a random-forest baseline](notebooks/03_xgboost_feature_ablation_and_baseline.ipynb).
-   * [MLP](notebooks/04_mlp.ipynb) with median imputation, missing-value
-     indicators, scaling and one-hot encoding in a scikit-learn pipeline.
-   * [LightGBM](notebooks/05_lightgbm.ipynb) on 70 features (all amount,
-     days-past-due and masked-category columns), with early stopping.
-5. **Evaluation.** 60/20/20 train/validation/test split; AUC and the stability
-   metric on each part; weekly Gini plotted over time.
+We started by pulling features out of the different tables and looking at how
+they relate to default ([notebook 01](notebooks/01_data_cleaning_eda_feature_engineering.ipynb)).
+Most individual features turned out to be only weakly related to default on
+their own. Income, monthly payment and total debt look almost the same for
+people who defaulted and people who didn't. The strongest single signal was
+the credit bureau's own risk estimate, which comes as text like `"6% - 8%"`. We
+converted it into a number, but it only exists for a small share of applicants.
+
+From there we tried three kinds of model:
+
+* **XGBoost** ([notebook 02](notebooks/02_xgboost.ipynb),
+  [notebook 03](notebooks/03_xgboost_feature_ablation_and_baseline.ipynb)),
+  a gradient-boosted tree model, with class weighting to handle the fact that
+  defaults are rare. It was compared against a random-forest baseline and
+  against versions without the engineered features.
+* **A neural network** ([notebook 04](notebooks/04_mlp.ipynb)), a scikit-learn
+  MLP behind a pipeline that fills in missing values, flags where they were
+  missing, scales numeric columns and one-hot encodes categories.
+* **LightGBM** ([notebook 05](notebooks/05_lightgbm.ipynb)), another
+  gradient-boosted tree model, using 70 features and early stopping. It started
+  from the competition's public starter notebook, and I built the evaluation
+  and the over-time analysis around it.
+
+Each model was trained on 60% of the applications, tuned on 20% and tested on
+the remaining 20%.
 
 ## Results
 
-| | MLP | LightGBM |
+LightGBM worked best for us:
+
+| | Neural network | LightGBM |
 |---|---|---|
 | AUC, train | 0.796 | 0.792 |
 | AUC, validation | 0.595 | 0.782 |
@@ -81,101 +89,62 @@ reference code, is in [`src/creditrisk/metrics.py`](src/creditrisk/metrics.py).
 | Stability, validation | 0.109 | 0.534 |
 | Stability, test | 0.111 | **0.521** |
 
-<sub>Outputs saved in notebooks 04 and 05. The XGBoost notebooks (02, 03) report their own experiments, including a class-weight and depth search and a feature ablation; they use a different feature set and scoring setup, so they are not tabulated side by side here.</sub>
-
-LightGBM generalises well: its stability score moves from 0.562 on training
-data to 0.521 on held-out data, with a train-test AUC gap of 0.014.
+What I like about the LightGBM result is how close the training and test
+numbers are: an AUC of 0.792 on data it had seen versus 0.778 on data it hadn't.
+The weekly picture tells the same story:
 
 ![Weekly Gini of the LightGBM model](reports/figures/lightgbm_weekly_gini.png)
 
-*LightGBM, Gini per week with fitted trend lines.* Train, validation and test
-track each other, and the trend is upward, so the falling-rate penalty is
-zero. Volatility rises sharply after about week 60 (March 2020, the onset of
-COVID-19), which is where the residual-volatility penalty comes from.
+The three curves follow each other closely, and the trend line slopes slightly
+upward, so the model isn't penalised for decaying. The noticeable change is
+around week 60, which is March 2020. From then on the weekly scores get much
+noisier, which lines up with the start of the COVID-19 pandemic and is where
+most of the stability penalty comes from.
 
-![Weekly Gini of the MLP](reports/figures/mlp_weekly_gini.png)
+The neural network is a useful contrast:
 
-*MLP, Gini per week.* The neural network fits the training weeks far better
-than held-out applications. It was given the decision date, month and week as
-inputs, which lets it learn period-specific default rates that do not
-transfer; boosted trees on the credit features proved the more robust choice.
+![Weekly Gini of the neural network](reports/figures/mlp_weekly_gini.png)
 
-The most important LightGBM features by gain are days-past-due history
-(`avgdpdtolclosure24`), total settled amount, the reason the client's last
+It does well on the weeks it trained on and much worse on new applications.
+Part of the reason is that it was given the decision date, month and week as
+inputs, so it could memorise how risky particular periods were, and that
+doesn't carry over to new data. The tree models, working from the actual
+credit history, held up much better.
+
+The features LightGBM relied on most were the applicant's history of late
+payments, the total amount they had already repaid, the reason their last
 application was rejected, and the price of the credit
-([chart](reports/figures/lightgbm_feature_importance.png)).
+([chart](reports/figures/lightgbm_feature_importance.png)). In other words,
+past repayment behaviour matters most, which is what you'd hope to see.
 
-## Next steps
+## Running the code
 
-- [ ] Compare all model families on one shared feature table and one shared
-      evaluation function (`creditrisk.metrics`).
-- [ ] Evaluate with a time-based split: train on the first 60% of weeks,
-      validate on the next 20%, test on the last 20%
-      (`creditrisk.splits.time_based_split`), since the splits so far are
-      random and every part contains every week.
-- [ ] Remove date and week columns from model inputs and retrain the MLP.
-- [ ] Use more of the depth-1 and depth-2 tables through richer aggregations.
-- [ ] Exclude protected attributes and audit for proxies before any
-      production use.
-- [ ] Monitor drift with a population stability index per feature and per week.
-- [ ] Explain the final model with SHAP values.
-
-## Repository structure
-
-```
-.
-├── notebooks/                # Analysis, in reading order (see notebooks/README.md)
-│   ├── 01_data_cleaning_eda_feature_engineering.ipynb
-│   ├── 02_xgboost.ipynb
-│   ├── 03_xgboost_feature_ablation_and_baseline.ipynb
-│   ├── 04_mlp.ipynb
-│   ├── 05_lightgbm.ipynb
-│   └── archive/              # Superseded drafts
-├── src/creditrisk/           # Reusable, tested code
-│   ├── data.py               #   loading tables, aggregating, joining on case_id
-│   ├── features.py           #   risk-band parsing, weighted days-past-due features
-│   ├── metrics.py            #   Gini and the stability metric
-│   └── splits.py             #   random and time-based splits
-├── tests/                    # pytest suite on synthetic data (runs in CI)
-├── reports/                  # Executive summary
-├── data/                     # Not in git; see data/README.md
-├── scripts/download_data.sh  # Fetches the data with the Kaggle API
-├── requirements.txt
-└── pyproject.toml
-```
-
-## Getting started
+The data isn't included in this repository. It has to be downloaded from Kaggle
+after accepting the competition rules; [`data/README.md`](data/README.md)
+explains how, and `scripts/download_data.sh` does the download once you have a
+Kaggle API token. It's about 4 GB.
 
 ```bash
 git clone https://github.com/Bra-AM/erdos-homecreditmodelstability.git
 cd erdos-homecreditmodelstability
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .
 
-pytest                           # tests need no data
-bash scripts/download_data.sh    # ~4 GB; needs a Kaggle API token, see data/README.md
+pytest                           # the tests use synthetic data, no download needed
+bash scripts/download_data.sh
 ```
 
-Using the package:
+The notebooks are in `notebooks/`, numbered in the order they're meant to be
+read, with a short guide in [`notebooks/README.md`](notebooks/README.md). The
+pieces worth reusing (loading and joining the tables, the engineered features,
+the stability metric and the train/test splits) are in a small package under
+`src/creditrisk/`, with tests in `tests/`.
 
 ```python
 from creditrisk import metrics, splits
 
-train, valid, test = splits.time_based_split(applications)
+train, valid, test = splits.random_split(applications)
 test = test.assign(score=model.predict_proba(test[features])[:, 1])
 metrics.stability_components(metrics.weekly_gini(test))
 # {'mean_gini': ..., 'slope': ..., 'residual_std': ..., 'stability': ...}
 ```
-
-## Team and credits
-
-| | Contribution |
-|---|---|
-| [Brady Ali Medina](https://www.linkedin.com/in/brady-ali-487864133/) | LightGBM and MLP modelling and evaluation (notebooks 04, 05), stability-over-time analysis; later the `creditrisk` package, tests and documentation |
-| Sze Hong Kwong | Data cleaning, exploratory analysis and feature engineering (notebook 01), XGBoost modelling and baseline (notebooks 02, 03) |
-
-The LightGBM notebook builds on the competition's public starter notebook
-(data-type handling, column selection, baseline parameters and the reference
-implementation of the stability metric). Data © Home Credit, provided through
-Kaggle under the competition rules; it is not redistributed here.
