@@ -12,8 +12,8 @@ In 2024 Home Credit, a consumer lender that serves many people with little or
 no credit history, ran a
 [Kaggle competition](https://www.kaggle.com/competitions/home-credit-credit-risk-model-stability)
 around exactly this question. A model wasn't judged only on how well it ranks
-applicants, but on whether it keeps doing so week after week. I worked on it
-with Sze Hong Kwong during the Spring 2024
+applicants, but on whether it keeps doing so week after week. We worked on it
+as a team of two, Sze Hong Kwong and me, during the Spring 2024
 [Erdos Institute](https://www.erdosinstitute.org/) Data Science Boot Camp
 ([project page](https://www.erdosinstitute.org/project-database/spring-2024/data-science-boot-camp/home-credit---credit-risk-model-stability-ii),
 [executive summary](reports/executive_summary_spring_2024.pdf)).
@@ -44,9 +44,9 @@ stability = mean(weekly Gini) + 88 · min(0, slope) − 0.5 · std(residuals)
 
 So a model gets credit for ranking applicants well on average, loses a lot if
 its performance trends downward over time, and loses a little if it bounces
-around from week to week. Getting better over time earns nothing extra. I
-implemented the metric in [`src/creditrisk/metrics.py`](src/creditrisk/metrics.py)
-and tested it against the competition's reference code.
+around from week to week. Getting better over time earns nothing extra. The metric is
+implemented in [`src/creditrisk/metrics.py`](src/creditrisk/metrics.py) and
+tested against the competition's reference code.
 
 ## What we did
 
@@ -69,9 +69,8 @@ From there we tried three kinds of model:
   MLP behind a pipeline that fills in missing values, flags where they were
   missing, scales numeric columns and one-hot encodes categories.
 * **LightGBM** ([notebook 05](notebooks/05_lightgbm.ipynb)), another
-  gradient-boosted tree model, using 70 features and early stopping. It started
-  from the competition's public starter notebook, and I built the evaluation
-  and the over-time analysis around it.
+  gradient-boosted tree model, using 70 features and early stopping, starting
+  from the competition's public starter notebook.
 
 Each model was trained on 60% of the applications, tuned on 20% and tested on
 the remaining 20%.
@@ -89,7 +88,7 @@ LightGBM worked best for us:
 | Stability, validation | 0.109 | 0.534 |
 | Stability, test | 0.111 | **0.521** |
 
-What I like about the LightGBM result is how close the training and test
+What stands out in the LightGBM result is how close the training and test
 numbers are: an AUC of 0.792 on data it had seen versus 0.778 on data it hadn't.
 The weekly picture tells the same story:
 
